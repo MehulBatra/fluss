@@ -22,8 +22,10 @@ import com.alibaba.fluss.config.Configuration;
 import com.alibaba.fluss.exception.InvalidDatabaseException;
 import com.alibaba.fluss.exception.InvalidTableException;
 import com.alibaba.fluss.exception.SecurityDisabledException;
+import com.alibaba.fluss.exception.TableAlreadyExistException;
 import com.alibaba.fluss.exception.TableNotPartitionedException;
 import com.alibaba.fluss.fs.FileSystem;
+import com.alibaba.fluss.lakehouse.lakestorage.LakeCatalog;
 import com.alibaba.fluss.metadata.DataLakeFormat;
 import com.alibaba.fluss.metadata.DatabaseDescriptor;
 import com.alibaba.fluss.metadata.PartitionSpec;
@@ -78,6 +80,7 @@ import com.alibaba.fluss.server.zk.data.BucketAssignment;
 import com.alibaba.fluss.server.zk.data.PartitionAssignment;
 import com.alibaba.fluss.server.zk.data.TableAssignment;
 import com.alibaba.fluss.server.zk.data.TableRegistration;
+import com.alibaba.fluss.utils.IOUtils;
 import com.alibaba.fluss.utils.concurrent.FutureUtils;
 
 import javax.annotation.Nullable;
@@ -98,6 +101,8 @@ import static com.alibaba.fluss.server.utils.ServerRpcMessageUtils.makeCreateAcl
 import static com.alibaba.fluss.server.utils.ServerRpcMessageUtils.makeDropAclsResponse;
 import static com.alibaba.fluss.server.utils.ServerRpcMessageUtils.toTablePath;
 import static com.alibaba.fluss.utils.PartitionUtils.validatePartitionSpec;
+import static com.alibaba.fluss.utils.Preconditions.checkNotNull;
+import static com.alibaba.fluss.utils.Preconditions.checkState;
 
 /** An RPC Gateway service for coordinator server. */
 public final class CoordinatorService extends RpcServiceBase implements CoordinatorGateway {
@@ -108,6 +113,7 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
 
     // null if the cluster hasn't configured datalake format
     private final @Nullable DataLakeFormat dataLakeFormat;
+    private final @Nullable LakeCatalog lakeCatalog;
 
     public CoordinatorService(
             Configuration conf,
@@ -116,7 +122,8 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
             Supplier<EventManager> eventManagerSupplier,
             ServerMetadataCache metadataCache,
             MetadataManager metadataManager,
-            @Nullable Authorizer authorizer) {
+            @Nullable Authorizer authorizer,
+            @Nullable LakeCatalog lakeCatalog) {
         super(
                 remoteFileSystem,
                 ServerType.COORDINATOR,
@@ -128,6 +135,12 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
         this.defaultReplicationFactor = conf.getInt(ConfigOptions.DEFAULT_REPLICATION_FACTOR);
         this.eventManagerSupplier = eventManagerSupplier;
         this.dataLakeFormat = conf.getOptional(ConfigOptions.DATALAKE_FORMAT).orElse(null);
+        this.lakeCatalog = lakeCatalog;
+        checkState(
+                (dataLakeFormat == null) == (lakeCatalog == null),
+                "dataLakeFormat and lakeCatalog must both be null or both non-null, but dataLakeFormat is %s, lakeCatalog is %s.",
+                dataLakeFormat,
+                lakeCatalog);
     }
 
     @Override
@@ -137,7 +150,7 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
 
     @Override
     public void shutdown() {
-        // no resources hold by coordinator service by now, nothing to do
+        IOUtils.closeQuietly(lakeCatalog, "lake catalog");
     }
 
     @Override
@@ -221,6 +234,21 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
                     TableAssignmentUtils.generateAssignment(bucketCount, replicaFactor, servers);
         }
 
+        // TODO: should tolerate if the lake exist but matches our schema. This ensures eventually
+        //  consistent by idempotently creating the table multiple times. See #846
+        // before create table in fluss, we may create in lake
+        if (isDataLakeEnabled(tableDescriptor)) {
+            try {
+                checkNotNull(lakeCatalog).createTable(tablePath, tableDescriptor);
+            } catch (TableAlreadyExistException e) {
+                throw new TableAlreadyExistException(
+                        String.format(
+                                "The table %s already exists in %s catalog, please "
+                                        + "first drop the table in %s catalog or use a new table name.",
+                                tablePath, dataLakeFormat, dataLakeFormat));
+            }
+        }
+
         // then create table;
         metadataManager.createTable(
                 tablePath, tableDescriptor, tableAssignment, request.isIgnoreIfExists());
@@ -250,9 +278,7 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
         }
 
         // lake table can only be enabled when the cluster configures datalake format
-        String dataLakeEnabledValue =
-                newDescriptor.getProperties().get(ConfigOptions.TABLE_DATALAKE_ENABLED.key());
-        boolean dataLakeEnabled = Boolean.parseBoolean(dataLakeEnabledValue);
+        boolean dataLakeEnabled = isDataLakeEnabled(tableDescriptor);
         if (dataLakeEnabled && dataLakeFormat == null) {
             throw new InvalidTableException(
                     String.format(
@@ -261,6 +287,12 @@ public final class CoordinatorService extends RpcServiceBase implements Coordina
         }
 
         return newDescriptor;
+    }
+
+    private boolean isDataLakeEnabled(TableDescriptor tableDescriptor) {
+        String dataLakeEnabledValue =
+                tableDescriptor.getProperties().get(ConfigOptions.TABLE_DATALAKE_ENABLED.key());
+        return Boolean.parseBoolean(dataLakeEnabledValue);
     }
 
     @Override
