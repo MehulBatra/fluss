@@ -99,7 +99,7 @@ const config: Config = {
         id: 'learn',
         path: 'learn',
         routeBasePath: 'learn',
-        sidebarPath: './learnSidebar.js',
+        sidebarPath: false,
         editUrl: ({docPath}) => {
           return `https://github.com/alibaba/fluss/edit/main/website/learn/${docPath}`;
         },
