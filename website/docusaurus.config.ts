@@ -94,11 +94,15 @@ const config: Config = {
       },
     ],
     [
-      '@docusaurus/plugin-content-pages',
+      '@docusaurus/plugin-content-docs',
       {
-        id: 'learn-pages',
+        id: 'learn',
         path: 'learn',
         routeBasePath: 'learn',
+        sidebarPath: './learnSidebar.js',
+        editUrl: ({docPath}) => {
+          return `https://github.com/alibaba/fluss/edit/main/website/learn/${docPath}`;
+        },
       },
     ],
     [
