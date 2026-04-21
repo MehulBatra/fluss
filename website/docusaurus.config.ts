@@ -20,7 +20,8 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import lightTheme from './src/utils/prismLight';
 import versionReplace from './src/plugins/remark-version-replace/index';
-import { loadVersionData } from './src/utils/versionData';
+import {loadVersionData} from './src/utils/versionData';
+
 const { versionsMap, latestVersion } = loadVersionData();
 
 const config: Config = {
@@ -46,6 +47,26 @@ const config: Config = {
   // Serve blog-dependent static resources (avatars) from blog/static/
   // Blog content is cloned from a separate repo via setup_blog.sh
   staticDirectories: ['static', 'blog/static'],
+
+  scripts: [
+    {
+      src: 'https://widget.kapa.ai/kapa-widget.bundle.js',
+      async: true,
+      'data-website-id': '40ccde97-65ed-46d8-81f2-fe8a8a31f9d9',
+      'data-project-name': 'Apache Fluss',
+      'data-project-color': '#0071e3',
+      'data-modal-header-bg-color': '#0071e3',
+      'data-modal-title-color': '#ffffff',
+      'data-project-logo': 'https://fluss.apache.org/img/logo/svg/white_color_logo_notext.svg',
+      'data-button-text': 'Ask AI',
+      'data-button-position-right': '40px',
+      'data-modal-title': 'Ask Apache Fluss AI',
+      'data-modal-example-questions':
+        'What is Apache Fluss?,How do I create a Log & PK table?,How do I use change data feed?,How do I configure streaming lakehouse?',
+      'data-modal-disclaimer':
+        'This is an AI assistant trained on Apache Fluss documentation, codebase. Answers are AI-generated and may be inaccurate, verify against the official docs.',
+    },
+  ],
 
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
