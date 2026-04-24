@@ -54,12 +54,13 @@ const config: Config = {
       async: true,
       'data-website-id': '40ccde97-65ed-46d8-81f2-fe8a8a31f9d9',
       'data-project-name': 'Apache Fluss',
-      'data-project-color': '#0071e3',
-      'data-modal-header-bg-color': '#0071e3',
+      'data-project-color': '#06b6d4',
+      'data-modal-header-bg-color': '#2563eb',
       'data-modal-title-color': '#ffffff',
       'data-project-logo': 'https://fluss.apache.org/img/logo/svg/white_color_logo_notext.svg',
       'data-button-text': 'Ask AI',
-      'data-button-position-right': '40px',
+      'data-button-hide': 'true',
+      'data-modal-override-open-class-ask-ai': 'navbar-ask-ai',
       'data-modal-title': 'Ask Apache Fluss AI',
       'data-modal-example-questions':
         'What is Apache Fluss?,How do I create a Log & PK table?,How do I use change data feed?,How do I configure streaming lakehouse?',
@@ -215,6 +216,11 @@ const config: Config = {
         {to: '/community/welcome', label: 'Community', position: 'left'},
         {to: '/roadmap', label: 'Roadmap', position: 'left'},
         {to: '/downloads', label: 'Downloads', position: 'left'},
+        {
+          type: 'html',
+          position: 'right',
+          value: '<button class="navbar-ask-ai" type="button" aria-label="Ask AI">Ask AI</button>',
+        },
         {
             label: 'ASF', position: 'right', items: [
                 {to: 'https://www.apache.org/', label: 'Foundation'},
