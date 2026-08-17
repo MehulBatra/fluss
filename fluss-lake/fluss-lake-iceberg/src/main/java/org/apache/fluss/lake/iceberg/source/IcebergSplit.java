@@ -22,6 +22,8 @@ import org.apache.fluss.lake.source.LakeSplit;
 
 import org.apache.iceberg.FileScanTask;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Split for Iceberg table. */
@@ -51,6 +53,22 @@ public class IcebergSplit implements LakeSplit {
 
     public FileScanTask fileScanTask() {
         return fileScanTask;
+    }
+
+    @Nullable
+    @Override
+    public String fileName() {
+        return fileNameOf(fileScanTask);
+    }
+
+    /** Returns the basename of the split's single data file, used as the DV FileDict key. */
+    static String fileNameOf(FileScanTask fileScanTask) {
+        String location = fileScanTask.file().location();
+        if (location == null) {
+            return null;
+        }
+        int slash = location.lastIndexOf('/');
+        return slash >= 0 ? location.substring(slash + 1) : location;
     }
 
     @Override

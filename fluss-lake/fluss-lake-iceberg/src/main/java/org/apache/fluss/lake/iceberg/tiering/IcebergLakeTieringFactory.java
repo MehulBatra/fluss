@@ -20,10 +20,13 @@ package org.apache.fluss.lake.iceberg.tiering;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.lake.committer.CommitterInitContext;
 import org.apache.fluss.lake.committer.LakeCommitter;
+import org.apache.fluss.lake.iceberg.source.IcebergLakeSource;
 import org.apache.fluss.lake.serializer.SimpleVersionedSerializer;
+import org.apache.fluss.lake.source.LakeSource;
 import org.apache.fluss.lake.writer.LakeTieringFactory;
 import org.apache.fluss.lake.writer.LakeWriter;
 import org.apache.fluss.lake.writer.WriterInitContext;
+import org.apache.fluss.metadata.TablePath;
 
 import java.io.IOException;
 
@@ -33,9 +36,11 @@ public class IcebergLakeTieringFactory
 
     private static final long serialVersionUID = 1L;
 
+    private final Configuration icebergConfig;
     private final IcebergCatalogProvider icebergCatalogProvider;
 
     public IcebergLakeTieringFactory(Configuration icebergConfig) {
+        this.icebergConfig = icebergConfig;
         this.icebergCatalogProvider = new IcebergCatalogProvider(icebergConfig);
     }
 
@@ -59,5 +64,16 @@ public class IcebergLakeTieringFactory
     @Override
     public SimpleVersionedSerializer<IcebergCommittable> getCommittableSerializer() {
         return new IcebergCommittableSerializer();
+    }
+
+    @Override
+    public LakeSource<?> createLakeSource(CommitterInitContext committerInitContext) {
+        return new IcebergLakeSource(
+                committerInitContext.lakeTieringConfig(), committerInitContext.tablePath());
+    }
+
+    @Override
+    public LakeSource<?> createLakeSource(TablePath tablePath) {
+        return new IcebergLakeSource(icebergConfig, tablePath);
     }
 }
