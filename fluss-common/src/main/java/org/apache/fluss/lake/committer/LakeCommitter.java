@@ -87,4 +87,23 @@ public interface LakeCommitter<WriteResult, CommittableT> extends AutoCloseable 
     @Nullable
     CommittedLakeSnapshot getMissingLakeSnapshot(@Nullable Long latestLakeSnapshotIdOfFluss)
             throws IOException;
+
+    /**
+     * Materializes logical deletion vectors into physical delete files on top of {@code
+     * baseSnapshotId}. The map is keyed by lake data-file path; each value is a serialized
+     * RoaringBitmap of deleted row positions in that file. No-op by default; lakes that support
+     * deletion vectors (e.g. Iceberg v3 Puffin) override this.
+     *
+     * @param lakeDvByFilePath deleted row positions per lake data-file path (serialized bitmaps)
+     * @param baseSnapshotId the snapshot whose data files the positions reference
+     * @param snapshotProperties properties to attach to the produced snapshot
+     * @throws IOException if an I/O error occurs
+     */
+    default void materializeDeletionVectors(
+            Map<String, byte[]> lakeDvByFilePath,
+            long baseSnapshotId,
+            Map<String, String> snapshotProperties)
+            throws IOException {
+        // no-op by default
+    }
 }

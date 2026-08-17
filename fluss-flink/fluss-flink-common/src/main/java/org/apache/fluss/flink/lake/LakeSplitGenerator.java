@@ -493,8 +493,11 @@ public class LakeSplitGenerator {
     // --------- DV fetch helpers ---------
 
     /**
-     * Finds buckets that need DV data. Only buckets where the readable offset (snapshot log offset)
-     * differs from the latest offset (stopping offset) need DV filtering.
+     * Finds buckets that need DV data. A DV-enabled bucket needs its DV snapshot when either it has
+     * lake snapshot data (whose stale rows must be masked by LakeDv) or there is a hot-log gap
+     * (readable offset &lt; latest, needing LogDv). Buckets with lake data but no log gap must
+     * still be included; otherwise they fall back to the sort-merge path, which has no comparator
+     * for Iceberg (non-sorted lake reader) and throws.
      */
     private Set<TableBucket> findBucketsNeedingDv(
             Map<TableBucket, Long> tableBucketsOffset, Map<TableBucket, Long> allStoppingOffsets) {
@@ -503,8 +506,9 @@ public class LakeSplitGenerator {
             TableBucket tb = entry.getKey();
             long snapshotLogOffset = entry.getValue();
             Long stoppingOffset = allStoppingOffsets.get(tb);
-            // Only need DV when readable offset != latest offset
-            if (stoppingOffset == null
+            // Include buckets with lake snapshot data (need LakeDv), plus the log-gap cases.
+            if (snapshotLogOffset >= 0
+                    || stoppingOffset == null
                     || stoppingOffset == NO_STOPPING_OFFSET
                     || snapshotLogOffset != stoppingOffset) {
                 result.add(tb);

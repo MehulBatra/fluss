@@ -77,7 +77,8 @@ public class LakeSplitReaderGenerator {
         if (split instanceof LakeSnapshotSplit) {
             LakeSnapshotSplit lakeSnapshotSplit = (LakeSnapshotSplit) split;
             LakeSnapshotScanner lakeSnapshotScanner =
-                    new LakeSnapshotScanner(lakeSource, lakeSnapshotSplit);
+                    new LakeSnapshotScanner(
+                            lakeSource, lakeSnapshotSplit, lakeSnapshotProjection());
             return new BoundedSplitReader(
                     lakeSnapshotScanner, lakeSnapshotSplit.getRecordsToSkip());
         } else if (split instanceof LakeSnapshotAndFlussLogSplit) {
@@ -87,6 +88,21 @@ public class LakeSplitReaderGenerator {
             throw new UnsupportedOperationException(
                     String.format("The split type of %s is not supported.", split.getClass()));
         }
+    }
+
+    /**
+     * Projection for lake-snapshot reads as {@code int[][]} (one column per entry). Falls back to
+     * all user columns when no projection is pushed down, so {@code readWithPos()} never emits an
+     * empty row.
+     */
+    private int[][] lakeSnapshotProjection() {
+        int[] fields =
+                (projectedFields != null && projectedFields.length > 0)
+                        ? projectedFields
+                        : java.util.stream.IntStream.range(
+                                        0, table.getTableInfo().getRowType().getFieldCount())
+                                .toArray();
+        return java.util.Arrays.stream(fields).mapToObj(f -> new int[] {f}).toArray(int[][]::new);
     }
 
     private BatchScanner getBatchScanner(LakeSnapshotAndFlussLogSplit lakeSplit) {

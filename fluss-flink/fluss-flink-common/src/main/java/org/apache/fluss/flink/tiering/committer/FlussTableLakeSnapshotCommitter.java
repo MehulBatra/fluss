@@ -134,7 +134,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
             String lakeBucketTieredOffsetsPath,
             Map<TableBucket, Long> logEndOffsets,
             Map<TableBucket, Long> logMaxTieredTimestamps,
-            @Nullable Map<TableBucket, DvBucketData> dvReport)
+            @Nullable Map<TableBucket, DvBucketData> dvReport,
+            long indexSnapshotId)
             throws IOException {
         Long earliestSnapshotIDToKeep = lakeCommitResult.getEarliestSnapshotIDToKeep();
         if (lakeCommitResult.committedIsReadable()) {
@@ -146,7 +147,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
                     logEndOffsets,
                     logMaxTieredTimestamps,
                     earliestSnapshotIDToKeep,
-                    dvReport);
+                    dvReport,
+                    indexSnapshotId);
         } else {
             LakeCommitResult.ReadableSnapshot readableSnapshot =
                     lakeCommitResult.getReadableSnapshot();
@@ -160,7 +162,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
                         logEndOffsets,
                         logMaxTieredTimestamps,
                         earliestSnapshotIDToKeep,
-                        dvReport);
+                        dvReport,
+                        indexSnapshotId);
             } else {
                 // readable snapshot is known, we will first commit a snapshot with readable bucket
                 // offset
@@ -187,7 +190,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
                         Collections.emptyMap(),
                         Collections.emptyMap(),
                         earliestSnapshotIDToKeep,
-                        dvReport);
+                        dvReport,
+                        indexSnapshotId);
 
                 // commit the tiered snapshot without dvReport
                 commit(
@@ -199,7 +203,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
                         logEndOffsets,
                         logMaxTieredTimestamps,
                         earliestSnapshotIDToKeep,
-                        null);
+                        null,
+                        0L);
             }
         }
     }
@@ -212,7 +217,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
             Map<TableBucket, Long> logEndOffsets,
             Map<TableBucket, Long> logMaxTieredTimestamps,
             @Nullable Long earliestSnapshotIDToKeep,
-            @Nullable Map<TableBucket, DvBucketData> dvReport)
+            @Nullable Map<TableBucket, DvBucketData> dvReport,
+            long indexSnapshotId)
             throws IOException {
         try {
             CommitLakeTableSnapshotRequest request =
@@ -224,7 +230,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
                             logEndOffsets,
                             logMaxTieredTimestamps,
                             earliestSnapshotIDToKeep,
-                            dvReport);
+                            dvReport,
+                            indexSnapshotId);
             List<PbCommitLakeTableSnapshotRespForTable> commitLakeTableSnapshotRespForTables =
                     coordinatorGateway.commitLakeTableSnapshot(request).get().getTableRespsList();
             checkState(commitLakeTableSnapshotRespForTables.size() == 1);
@@ -304,7 +311,8 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
             Map<TableBucket, Long> logEndOffsets,
             Map<TableBucket, Long> logMaxTieredTimestamps,
             @Nullable Long earliestSnapshotIDToKeep,
-            @Nullable Map<TableBucket, DvBucketData> dvReport) {
+            @Nullable Map<TableBucket, DvBucketData> dvReport,
+            long indexSnapshotId) {
         CommitLakeTableSnapshotRequest commitLakeTableSnapshotRequest =
                 new CommitLakeTableSnapshotRequest();
 
@@ -326,6 +334,9 @@ public class FlussTableLakeSnapshotCommitter implements AutoCloseable {
         // Serialize DvPositionReport if present
         if (dvReport != null && !dvReport.isEmpty()) {
             PbDvPositionReport pbReport = pbLakeTableSnapshotMetadata.setDvPositionReport();
+            if (indexSnapshotId > 0) {
+                pbReport.setIndexSnapshotId(indexSnapshotId);
+            }
             for (Map.Entry<TableBucket, DvBucketData> entry : dvReport.entrySet()) {
                 TableBucket tb = entry.getKey();
                 DvBucketData data = entry.getValue();

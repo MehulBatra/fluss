@@ -94,7 +94,8 @@ class FlussTableLakeSnapshotCommitterTest extends FlinkTestBase {
                 Collections.emptyMap(),
                 // test null which only keep one snapshot
                 null,
-                null);
+                null,
+                0L);
         LakeSnapshot lakeSnapshot = admin.getLatestLakeSnapshot(tablePath).get();
         assertThat(lakeSnapshot.getSnapshotId()).isEqualTo(snapshotId1);
         // get and check the offsets
@@ -123,7 +124,8 @@ class FlussTableLakeSnapshotCommitterTest extends FlinkTestBase {
                 Collections.emptyMap(),
                 Collections.emptyMap(),
                 LakeCommitResult.KEEP_ALL_PREVIOUS,
-                null);
+                null,
+                0L);
 
         // test get readable snapshot
         LakeSnapshot readLakeSnapshot = admin.getLatestLakeSnapshot(tablePath).get();
@@ -150,7 +152,8 @@ class FlussTableLakeSnapshotCommitterTest extends FlinkTestBase {
                 Collections.emptyMap(),
                 Collections.emptyMap(),
                 snapshotId2,
-                null);
+                null,
+                0L);
 
         // now, verify we can't get snapshot 1
         assertThatThrownBy(() -> admin.getLakeSnapshot(tablePath, snapshotId1).get())

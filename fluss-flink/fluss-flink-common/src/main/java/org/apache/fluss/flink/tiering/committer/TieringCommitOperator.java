@@ -51,6 +51,8 @@ import org.apache.fluss.metadata.ResolvedPartitionSpec;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.metadata.TableInfo;
 import org.apache.fluss.metadata.TablePath;
+import org.apache.fluss.rpc.messages.GetDvSnapshotResponse;
+import org.apache.fluss.rpc.messages.PbLakeDvEntry;
 import org.apache.fluss.utils.ExceptionUtils;
 import org.apache.fluss.utils.FlussPaths;
 
@@ -212,8 +214,8 @@ public class TieringCommitOperator<WriteResult, Committable>
                     // so the commit includes both write results and DV data
                     pendingTablePaths.put(tableId, tablePath);
                 } else {
-                    // no DV scan needed — commit and finish immediately
-                    commitAndFinish(tableId, tablePath, committableWriteResults, null, null);
+                    // no DV scan needed — commit and finish immediately (no index snapshot)
+                    commitAndFinish(tableId, tablePath, committableWriteResults, null, null, 0L);
                 }
             } catch (Exception e) {
                 // if any exception happens, send to source coordinator to mark it as failed
@@ -241,7 +243,8 @@ public class TieringCommitOperator<WriteResult, Committable>
             TablePath tablePath,
             List<TableBucketWriteResult<WriteResult>> committableWriteResults,
             @Nullable List<RowPosResult> rowPosResults,
-            @Nullable Map<String, Map<Integer, List<String>>> deletedFiles)
+            @Nullable Map<String, Map<Integer, List<String>>> deletedFiles,
+            long indexSnapshotId)
             throws Exception {
         // filter down to buckets that actually produced data
         List<TableBucketWriteResult<WriteResult>> nonEmptyResults =
@@ -377,10 +380,14 @@ public class TieringCommitOperator<WriteResult, Committable>
                                     remoteDataDir, tablePath, tableId);
                     RowPosSstUploader uploader = new RowPosSstUploader(remoteLakeTableSnapshotDir);
                     RowPosSstIndex emptyIndex = new RowPosSstIndex(Collections.emptyMap());
+                    // empty index must key on the download snapshot (index snapshot when distinct)
+                    long emptyIndexSnapshotId =
+                            indexSnapshotId > 0
+                                    ? indexSnapshotId
+                                    : readable.getReadableSnapshotId();
                     for (Long partKey : emptyIndexPartitions) {
                         Long partitionId = partKey == -1L ? null : partKey;
-                        uploader.writeIndex(
-                                readable.getReadableSnapshotId(), partitionId, emptyIndex);
+                        uploader.writeIndex(emptyIndexSnapshotId, partitionId, emptyIndex);
                     }
                 }
             }
@@ -393,7 +400,8 @@ public class TieringCommitOperator<WriteResult, Committable>
                     lakeBucketTieredOffsetsFile,
                     logEndOffsets,
                     logMaxTieredTimestamps,
-                    dvReport);
+                    dvReport,
+                    indexSnapshotId);
             return new CommitResult(committable, lakeCommitResult.getTieringStats());
         }
     }
@@ -473,7 +481,8 @@ public class TieringCommitOperator<WriteResult, Committable>
                     Collections.emptyMap(),
                     Collections.emptyMap(),
                     LakeCommitResult.KEEP_ALL_PREVIOUS,
-                    null);
+                    null,
+                    0L);
             // abort this committable to delete the written files
             lakeCommitter.abort(committable);
             throw new IllegalStateException(
@@ -544,14 +553,24 @@ public class TieringCommitOperator<WriteResult, Committable>
             TablePath tablePath,
             List<TableBucketWriteResult<WriteResult>> committableWriteResults,
             @Nullable List<RowPosResult> rowPosResults,
-            @Nullable Map<String, Map<Integer, List<String>>> deletedFiles)
+            @Nullable Map<String, Map<Integer, List<String>>> deletedFiles,
+            long indexSnapshotId)
             throws Exception {
         CommitResult commitResult =
                 commitWriteResults(
-                        tableId, tablePath, committableWriteResults, rowPosResults, deletedFiles);
+                        tableId,
+                        tablePath,
+                        committableWriteResults,
+                        rowPosResults,
+                        deletedFiles,
+                        indexSnapshotId);
         if (commitResult.committable != null) {
             output.collect(new StreamRecord<>(new CommittableMessage<>(commitResult.committable)));
         }
+        // Materialize the server's logical LakeDv into physical Iceberg Puffin DVs so $lake and
+        // external engines mask too. Runs every round (incl. empty delete rounds) keyed off the
+        // readable snapshot, since the readable-switch lags the data commit. Best-effort.
+        maybeMaterializeDeletionVectors(tableId, tablePath);
         collectedTableBucketWriteResults.remove(tableId);
         operatorEventGateway.sendEventToCoordinator(
                 new SourceEventWrapper(new FinishedTieringEvent(tableId, commitResult.stats)));
@@ -598,10 +617,13 @@ public class TieringCommitOperator<WriteResult, Committable>
                 writeIndexJson(tableId, tablePath, compactSnapshotId, results);
             }
 
-            // commit the deferred write results to the lake
+            // commit the deferred write results to the lake; the RowPos index was uploaded under
+            // compactSnapshotId, so carry it so the server downloads from the matching path.
             List<TableBucketWriteResult<WriteResult>> writeResults =
                     collectedTableBucketWriteResults.get(tableId);
-            commitAndFinish(tableId, tablePath, writeResults, results, deletedFiles);
+            long indexSnapshotId = compactSnapshotId != null ? compactSnapshotId : 0L;
+            commitAndFinish(
+                    tableId, tablePath, writeResults, results, deletedFiles, indexSnapshotId);
         } catch (Exception e) {
             collectedTableBucketWriteResults.remove(tableId);
             operatorEventGateway.sendEventToCoordinator(
@@ -865,6 +887,78 @@ public class TieringCommitOperator<WriteResult, Committable>
         }
         List<String> files = bucketMap.get(bucketId);
         return files != null ? files : Collections.emptyList();
+    }
+
+    /**
+     * Fetches the server's logical LakeDv (per-file deleted positions) for the previous readable
+     * snapshot and asks the lake committer to materialize it into physical deletion vectors
+     * (Iceberg v3 Puffin), so {@code $lake} and external engines mask too. Best-effort: any failure
+     * is logged and skipped — union-read masking still works via the logical LakeDv, and the
+     * cumulative LakeDv is re-materialized next round.
+     */
+    private void maybeMaterializeDeletionVectors(long tableId, TablePath tablePath) {
+        try {
+            TableInfo tableInfo = admin.getTableInfo(tablePath).get();
+            if (!tableInfo.isDeletionVectorsEnabled()) {
+                return;
+            }
+            LOG.info("DV materialize: check for table {} ({}).", tablePath, tableId);
+            // Materialize against the READABLE snapshot (the one union read masks against);
+            // getDvSnapshot rejects any other id as stale. Absent early on -> nothing to do yet.
+            LakeSnapshot readable;
+            try {
+                readable = admin.getReadableLakeSnapshot(tablePath).get();
+            } catch (Exception noReadable) {
+                LOG.info(
+                        "DV materialize: no readable lake snapshot yet for table {} ({}), skipping.",
+                        tablePath,
+                        tableId);
+                return;
+            }
+            long baseSnapshotId = readable.getSnapshotId();
+            Map<String, byte[]> lakeDv = new HashMap<>();
+            for (TableBucket tb : readable.getTableBucketsOffset().keySet()) {
+                GetDvSnapshotResponse resp =
+                        admin.getDvSnapshot(
+                                        tablePath,
+                                        tableId,
+                                        tb.getPartitionId(),
+                                        tb.getBucket(),
+                                        baseSnapshotId)
+                                .get();
+                for (PbLakeDvEntry entry : resp.getLakeDvEntriesList()) {
+                    lakeDv.put(entry.getFilePath(), entry.getDeletedPositionsBitmap());
+                }
+            }
+            LOG.info(
+                    "DV materialize: table {} ({}) readable snapshot {} has {} LakeDv file(s).",
+                    tablePath,
+                    tableId,
+                    baseSnapshotId,
+                    lakeDv.size());
+            if (lakeDv.isEmpty()) {
+                return;
+            }
+            LOG.info(
+                    "DV materialize: writing Puffin DVs for {} file(s) on snapshot {} of table {}.",
+                    lakeDv.size(),
+                    baseSnapshotId,
+                    tablePath);
+            try (LakeCommitter<WriteResult, Committable> committer =
+                    lakeTieringFactory.createLakeCommitter(
+                            new TieringCommitterInitContext(
+                                    tablePath, tableInfo, lakeTieringConfig, flussConfig))) {
+                committer.materializeDeletionVectors(
+                        lakeDv, baseSnapshotId, Collections.<String, String>emptyMap());
+            }
+        } catch (Exception e) {
+            LOG.warn(
+                    "Failed to materialize deletion vectors for table {} ({}); union-read masking "
+                            + "still works via logical LakeDv, will retry next round.",
+                    tablePath,
+                    tableId,
+                    e);
+        }
     }
 
     @Override

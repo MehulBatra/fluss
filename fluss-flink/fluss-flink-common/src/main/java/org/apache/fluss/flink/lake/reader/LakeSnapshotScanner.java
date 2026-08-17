@@ -51,9 +51,16 @@ public class LakeSnapshotScanner implements BatchScanner {
     private CloseableIterator<InternalRow> rowsIterator;
 
     public LakeSnapshotScanner(
-            LakeSource<LakeSplit> lakeSource, LakeSnapshotSplit lakeSnapshotSplit) {
+            LakeSource<LakeSplit> lakeSource,
+            LakeSnapshotSplit lakeSnapshotSplit,
+            @Nullable int[][] projection) {
         this.lakeSource = lakeSource;
         this.lakeSnapshotSplit = lakeSnapshotSplit;
+        // readWithPos()/read() only emit the projected columns; the DV path in particular needs a
+        // non-null projection, else the reader emits an empty row (only _pos, then stripped).
+        if (projection != null) {
+            lakeSource.withProject(projection);
+        }
     }
 
     @Nullable
