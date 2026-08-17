@@ -908,7 +908,8 @@ class DvTableReadableSnapshotRetrieverTest {
                 tieredSnapshotOffsetPath,
                 lakeSnapshotTieredEndOffset,
                 Collections.emptyMap(),
-                null);
+                null,
+                0L);
     }
 
     /**
