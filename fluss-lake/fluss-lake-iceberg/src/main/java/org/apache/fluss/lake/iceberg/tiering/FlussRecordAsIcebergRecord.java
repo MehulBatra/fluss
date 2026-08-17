@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
+import static org.apache.fluss.lake.iceberg.IcebergLakeCatalog.ROWID_COLUMN_NAME;
 import static org.apache.fluss.lake.iceberg.IcebergLakeCatalog.SYSTEM_COLUMNS;
 import static org.apache.fluss.metadata.TableDescriptor.BUCKET_COLUMN_NAME;
 import static org.apache.fluss.metadata.TableDescriptor.OFFSET_COLUMN_NAME;
@@ -42,8 +43,9 @@ import static org.apache.fluss.utils.Preconditions.checkState;
  */
 public class FlussRecordAsIcebergRecord extends FlussRowAsIcebergRecord {
 
-    // Lake table for iceberg will append three system columns: __bucket, __offset,__timestamp
-    private static final int LAKE_ICEBERG_SYSTEM_COLUMNS = SYSTEM_COLUMNS.size();
+    // Iceberg appends system columns __bucket, __offset, __timestamp (and __rowid for DV tables).
+    private final int systemColumnCount;
+    private final boolean dvEnabled;
 
     private LogRecord logRecord;
     private final int bucket;
@@ -53,8 +55,15 @@ public class FlussRecordAsIcebergRecord extends FlussRowAsIcebergRecord {
 
     public FlussRecordAsIcebergRecord(
             int bucket, Types.StructType structType, RowType flussRowType) {
+        this(bucket, structType, flussRowType, false);
+    }
+
+    public FlussRecordAsIcebergRecord(
+            int bucket, Types.StructType structType, RowType flussRowType, boolean dvEnabled) {
         super(structType, flussRowType);
         this.bucket = bucket;
+        this.dvEnabled = dvEnabled;
+        this.systemColumnCount = dvEnabled ? SYSTEM_COLUMNS.size() + 1 : SYSTEM_COLUMNS.size();
     }
 
     public void setFlussRecord(LogRecord logRecord) {
@@ -62,12 +71,15 @@ public class FlussRecordAsIcebergRecord extends FlussRowAsIcebergRecord {
         this.internalRow = logRecord.getRow();
         this.originRowFieldCount = internalRow.getFieldCount();
         checkState(
-                originRowFieldCount == structType.fields().size() - LAKE_ICEBERG_SYSTEM_COLUMNS,
+                originRowFieldCount == structType.fields().size() - systemColumnCount,
                 "The Iceberg table fields count must equals to LogRecord's fields count.");
     }
 
     @Override
     public Object getField(String name) {
+        if (dvEnabled && ROWID_COLUMN_NAME.equals(name)) {
+            return logRecord.logOffset();
+        }
         if (SYSTEM_COLUMNS.containsKey(name)) {
             switch (name) {
                 case BUCKET_COLUMN_NAME:
@@ -95,6 +107,9 @@ public class FlussRecordAsIcebergRecord extends FlussRowAsIcebergRecord {
         } else if (pos == originRowFieldCount + 2) {
             // timestamp column
             return toIcebergTimestampLtz(logRecord.timestamp());
+        } else if (dvEnabled && pos == originRowFieldCount + 3) {
+            // __rowid column = RowId = originating +I/+U log offset
+            return logRecord.logOffset();
         }
         return super.get(pos);
     }

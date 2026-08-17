@@ -47,6 +47,12 @@
             <artifactId>iceberg-core</artifactId>
             <version>${iceberg.version}</version>
         </dependency>
+        <!-- RoaringBitmap to decode the LogDv bitmap for DV-mode tiering writes -->
+        <dependency>
+            <groupId>org.roaringbitmap</groupId>
+            <artifactId>RoaringBitmap</artifactId>
+            <version>${roaringbitmap.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-data</artifactId>

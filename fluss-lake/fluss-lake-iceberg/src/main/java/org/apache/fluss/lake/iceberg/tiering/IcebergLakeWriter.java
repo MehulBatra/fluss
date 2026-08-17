@@ -21,6 +21,7 @@ import org.apache.fluss.lake.iceberg.maintenance.IcebergRewriteDataFiles;
 import org.apache.fluss.lake.iceberg.maintenance.RewriteDataFileResult;
 import org.apache.fluss.lake.iceberg.tiering.writer.AppendOnlyTaskWriter;
 import org.apache.fluss.lake.iceberg.tiering.writer.DeltaTaskWriter;
+import org.apache.fluss.lake.iceberg.tiering.writer.DvRecordWriter;
 import org.apache.fluss.lake.iceberg.tiering.writer.TaskWriterFactory;
 import org.apache.fluss.lake.writer.LakeWriter;
 import org.apache.fluss.lake.writer.WriterInitContext;
@@ -84,14 +85,18 @@ public class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
     }
 
     private RecordWriter createRecordWriter(WriterInitContext writerInitContext) {
+        boolean dvEnabled = writerInitContext.tableInfo().isDeletionVectorsEnabled();
         List<Integer> equalityFieldIds =
                 new ArrayList<>(icebergTable.schema().identifierFieldIds());
         TaskWriter<Record> taskWriter =
                 TaskWriterFactory.createTaskWriter(
                         icebergTable,
                         writerInitContext.partition(),
-                        writerInitContext.tableBucket().getBucket());
-        if (equalityFieldIds.isEmpty()) {
+                        writerInitContext.tableBucket().getBucket(),
+                        dvEnabled);
+        if (dvEnabled) {
+            return new DvRecordWriter(icebergTable, writerInitContext, taskWriter);
+        } else if (equalityFieldIds.isEmpty()) {
             return new AppendOnlyTaskWriter(icebergTable, writerInitContext, taskWriter);
         } else {
             return new DeltaTaskWriter(icebergTable, writerInitContext, taskWriter);

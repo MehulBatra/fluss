@@ -18,6 +18,7 @@
 package org.apache.fluss.lake.iceberg;
 
 import org.apache.fluss.annotation.VisibleForTesting;
+import org.apache.fluss.config.ConfigOptions;
 import org.apache.fluss.config.Configuration;
 import org.apache.fluss.exception.InvalidTableException;
 import org.apache.fluss.exception.TableAlreadyExistException;
@@ -40,6 +41,7 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.deletes.DeleteGranularity;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
@@ -77,6 +79,14 @@ public class IcebergLakeCatalog implements LakeCatalog {
         SYSTEM_COLUMNS.put(BUCKET_COLUMN_NAME, Types.IntegerType.get());
         SYSTEM_COLUMNS.put(OFFSET_COLUMN_NAME, Types.LongType.get());
         SYSTEM_COLUMNS.put(TIMESTAMP_COLUMN_NAME, Types.TimestampType.withZone());
+    }
+
+    // Extra system column for DV tables carrying the RowId (= originating +I/+U log offset).
+    public static final String ROWID_COLUMN_NAME = "__rowid";
+
+    private static boolean isDeletionVectorsEnabled(TableDescriptor tableDescriptor) {
+        return Configuration.fromMap(tableDescriptor.getProperties())
+                .get(ConfigOptions.TABLE_DELETION_VECTORS_ENABLED);
     }
 
     private final Catalog icebergCatalog;
@@ -178,8 +188,11 @@ public class IcebergLakeCatalog implements LakeCatalog {
         List<Types.NestedField> fields = new ArrayList<>();
         int fieldId = 0;
 
+        boolean dvEnabled = isDeletionVectorsEnabled(tableDescriptor);
         int totalTopLevelFields =
-                tableDescriptor.getSchema().getColumns().size() + SYSTEM_COLUMNS.size();
+                tableDescriptor.getSchema().getColumns().size()
+                        + SYSTEM_COLUMNS.size()
+                        + (dvEnabled ? 1 : 0);
         FlussDataTypeToIcebergDataType converter =
                 new FlussDataTypeToIcebergDataType(totalTopLevelFields);
 
@@ -187,7 +200,7 @@ public class IcebergLakeCatalog implements LakeCatalog {
         for (org.apache.fluss.metadata.Schema.Column column :
                 tableDescriptor.getSchema().getColumns()) {
             String colName = column.getName();
-            if (SYSTEM_COLUMNS.containsKey(colName)) {
+            if (SYSTEM_COLUMNS.containsKey(colName) || ROWID_COLUMN_NAME.equals(colName)) {
                 throw new IllegalArgumentException(
                         "Column '" + colName + "' conflicts with a reserved system column name.");
             }
@@ -215,6 +228,12 @@ public class IcebergLakeCatalog implements LakeCatalog {
             fields.add(
                     Types.NestedField.required(
                             fieldId++, systemColumn.getKey(), systemColumn.getValue()));
+        }
+
+        // DV tables carry an extra __rowid column (RowId = originating +I/+U log offset).
+        if (dvEnabled) {
+            fields.add(
+                    Types.NestedField.required(fieldId++, ROWID_COLUMN_NAME, Types.LongType.get()));
         }
 
         if (isPkTable) {
@@ -331,6 +350,13 @@ public class IcebergLakeCatalog implements LakeCatalog {
                     TableProperties.UPDATE_MODE, RowLevelOperationMode.MERGE_ON_READ.modeName());
             icebergProperties.put(
                     TableProperties.MERGE_MODE, RowLevelOperationMode.MERGE_ON_READ.modeName());
+
+            // DV tables use Iceberg v3 Puffin deletion vectors instead of equality deletes.
+            if (isDeletionVectorsEnabled(tableDescriptor)) {
+                icebergProperties.put(TableProperties.FORMAT_VERSION, "3");
+                icebergProperties.put(
+                        TableProperties.DELETE_GRANULARITY, DeleteGranularity.FILE.toString());
+            }
         }
 
         tableDescriptor

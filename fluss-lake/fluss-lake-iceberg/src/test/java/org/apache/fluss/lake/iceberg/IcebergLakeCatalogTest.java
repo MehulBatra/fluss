@@ -157,6 +157,81 @@ class IcebergLakeCatalogTest {
     }
 
     @Test
+    void testCreatePrimaryKeyTableWithDeletionVectors() {
+        String database = "test_db";
+        String tableName = "dv_table";
+
+        Schema flussSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .primaryKey("id")
+                        .build();
+
+        TableDescriptor tableDescriptor =
+                TableDescriptor.builder()
+                        .schema(flussSchema)
+                        .distributedBy(4, "id")
+                        .property(ConfigOptions.TABLE_DELETION_VECTORS_ENABLED.key(), "true")
+                        .build();
+
+        TablePath tablePath = TablePath.of(database, tableName);
+        flussIcebergCatalog.createTable(
+                tablePath, tableDescriptor, new TestingLakeCatalogContext());
+
+        Table createdTable =
+                flussIcebergCatalog
+                        .getIcebergCatalog()
+                        .loadTable(TableIdentifier.of(database, tableName));
+
+        // format-version 3 is stripped into table metadata, not surfaced via properties()
+        assertThat(
+                        ((org.apache.iceberg.BaseTable) createdTable)
+                                .operations()
+                                .current()
+                                .formatVersion())
+                .isEqualTo(3);
+        assertThat(createdTable.properties()).containsEntry("write.delete.granularity", "file");
+        // __rowid system column is appended after __bucket/__offset/__timestamp
+        assertThat(createdTable.schema().findField("__rowid")).isNotNull();
+        assertThat(createdTable.schema().findField("__rowid").type())
+                .isEqualTo(Types.LongType.get());
+    }
+
+    @Test
+    void testPrimaryKeyTableDefaultsToFormatV2WithoutDeletionVectors() {
+        String database = "test_db";
+        String tableName = "non_dv_table";
+
+        Schema flussSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .primaryKey("id")
+                        .build();
+
+        TableDescriptor tableDescriptor =
+                TableDescriptor.builder().schema(flussSchema).distributedBy(4, "id").build();
+
+        TablePath tablePath = TablePath.of(database, tableName);
+        flussIcebergCatalog.createTable(
+                tablePath, tableDescriptor, new TestingLakeCatalogContext());
+
+        Table createdTable =
+                flussIcebergCatalog
+                        .getIcebergCatalog()
+                        .loadTable(TableIdentifier.of(database, tableName));
+
+        assertThat(
+                        ((org.apache.iceberg.BaseTable) createdTable)
+                                .operations()
+                                .current()
+                                .formatVersion())
+                .isEqualTo(2);
+        assertThat(createdTable.schema().findField("__rowid")).isNull();
+    }
+
+    @Test
     void testCreatePartitionedPrimaryKeyTable() {
         String database = "test_db";
         String tableName = "pk_table";
