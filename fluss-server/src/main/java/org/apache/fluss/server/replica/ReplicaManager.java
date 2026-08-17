@@ -1128,6 +1128,10 @@ public class ReplicaManager implements ServerReconfigurable {
     private void handleDvPrepare(DvPrepareData dvPrepare) {
         long tableId = dvPrepare.getTableId();
         long snapshotId = dvPrepare.getReadableSnapshotId();
+        // The RowPos index/SST may live under a different snapshot than the readable one
+        // (e.g. Iceberg indexes the pre-commit snapshot). Fall back to readable when unset.
+        long indexSnapshotId =
+                dvPrepare.getIndexSnapshotId() > 0 ? dvPrepare.getIndexSnapshotId() : snapshotId;
 
         for (Map.Entry<TableBucket, DvPositionReportData.DvBucketOffset> entry :
                 dvPrepare.getBucketOffsets().entrySet()) {
@@ -1157,7 +1161,7 @@ public class ReplicaManager implements ServerReconfigurable {
                         tb.getPartitionId(),
                         bucketOffset,
                         downloader,
-                        snapshotId,
+                        indexSnapshotId,
                         localTempDir);
 
                 LOG.info("DV Prepare completed for {} snapshot {}", tb, snapshotId);

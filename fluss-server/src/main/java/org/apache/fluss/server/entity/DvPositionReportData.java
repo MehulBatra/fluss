@@ -28,9 +28,13 @@ import java.util.Map;
 public class DvPositionReportData {
 
     private final Map<TableBucket, DvBucketOffset> bucketOffsets;
+    // Snapshot the RowPos index/SST was uploaded under; may differ from the readable snapshot.
+    private final long indexSnapshotId;
 
-    public DvPositionReportData(Map<TableBucket, DvBucketOffset> bucketOffsets) {
+    public DvPositionReportData(
+            Map<TableBucket, DvBucketOffset> bucketOffsets, long indexSnapshotId) {
         this.bucketOffsets = bucketOffsets;
+        this.indexSnapshotId = indexSnapshotId;
     }
 
     /**
@@ -38,6 +42,11 @@ public class DvPositionReportData {
      */
     public Map<TableBucket, DvBucketOffset> getBucketOffsets() {
         return bucketOffsets;
+    }
+
+    /** Snapshot the RowPos index/SST was uploaded under (0 if indexed == readable snapshot). */
+    public long getIndexSnapshotId() {
+        return indexSnapshotId;
     }
 
     /** Per-bucket DV info including readable offset, file dict entries and old files. */

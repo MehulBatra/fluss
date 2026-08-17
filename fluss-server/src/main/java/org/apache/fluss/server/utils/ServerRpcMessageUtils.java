@@ -2286,7 +2286,8 @@ public class ServerRpcMessageUtils {
             TableBucket tb = new TableBucket(tableId, partitionId, bo.getBucketId());
             bucketOffsets.put(tb, parseDvBucketOffset(bo));
         }
-        return new DvPositionReportData(bucketOffsets);
+        long indexSnapshotId = pb.hasIndexSnapshotId() ? pb.getIndexSnapshotId() : 0L;
+        return new DvPositionReportData(bucketOffsets, indexSnapshotId);
     }
 
     /** Parses a {@link PbDvPrepare} proto into a {@link DvPrepareData}. */
@@ -2298,7 +2299,9 @@ public class ServerRpcMessageUtils {
             TableBucket tb = new TableBucket(tableId, partitionId, bo.getBucketId());
             bucketOffsets.put(tb, parseDvBucketOffset(bo));
         }
-        return new DvPrepareData(tableId, pb.getReadableSnapshotId(), bucketOffsets);
+        long indexSnapshotId = pb.hasIndexSnapshotId() ? pb.getIndexSnapshotId() : 0L;
+        return new DvPrepareData(
+                tableId, pb.getReadableSnapshotId(), indexSnapshotId, bucketOffsets);
     }
 
     private static DvPositionReportData.DvBucketOffset parseDvBucketOffset(PbDvBucketOffset bo) {
@@ -2334,6 +2337,9 @@ public class ServerRpcMessageUtils {
                 new PbDvPrepare()
                         .setTableId(data.getTableId())
                         .setReadableSnapshotId(data.getReadableSnapshotId());
+        if (data.getIndexSnapshotId() > 0) {
+            pb.setIndexSnapshotId(data.getIndexSnapshotId());
+        }
 
         for (Map.Entry<TableBucket, DvPositionReportData.DvBucketOffset> entry :
                 data.getBucketOffsets().entrySet()) {

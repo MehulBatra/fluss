@@ -27,6 +27,7 @@ import org.apache.fluss.metadata.PhysicalTablePath;
 import org.apache.fluss.metadata.Schema;
 import org.apache.fluss.metadata.TableBucket;
 import org.apache.fluss.metadata.TableDescriptor;
+import org.apache.fluss.metadata.TableInfo;
 import org.apache.fluss.metadata.TablePath;
 import org.apache.fluss.record.MemoryLogRecords;
 import org.apache.fluss.rpc.RpcClient;
@@ -502,7 +503,13 @@ public class ReplicaTestBase {
 
     protected Replica makeKvReplica(PhysicalTablePath physicalTablePath, TableBucket tableBucket)
             throws Exception {
-        return makeReplica(physicalTablePath, tableBucket, true, null);
+        return makeReplica(physicalTablePath, tableBucket, true, null, DATA1_TABLE_INFO);
+    }
+
+    protected Replica makeKvReplica(
+            PhysicalTablePath physicalTablePath, TableBucket tableBucket, TableInfo tableInfo)
+            throws Exception {
+        return makeReplica(physicalTablePath, tableBucket, true, null, tableInfo);
     }
 
     private Replica makeReplica(
@@ -510,6 +517,17 @@ public class ReplicaTestBase {
             TableBucket tableBucket,
             boolean isPkTable,
             @Nullable SnapshotContext snapshotContext)
+            throws Exception {
+        return makeReplica(
+                physicalTablePath, tableBucket, isPkTable, snapshotContext, DATA1_TABLE_INFO);
+    }
+
+    private Replica makeReplica(
+            PhysicalTablePath physicalTablePath,
+            TableBucket tableBucket,
+            boolean isPkTable,
+            @Nullable SnapshotContext snapshotContext,
+            TableInfo tableInfo)
             throws Exception {
         if (snapshotContext == null) {
             snapshotContext =
@@ -540,7 +558,7 @@ public class ReplicaTestBase {
                 serverMetadataCache,
                 NOPErrorHandler.INSTANCE,
                 metricGroup,
-                DATA1_TABLE_INFO,
+                tableInfo,
                 manualClock,
                 remoteLogManager,
                 scannerManager);

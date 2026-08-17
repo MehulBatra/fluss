@@ -29,6 +29,7 @@ import org.roaringbitmap.longlong.Roaring64Bitmap;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -55,6 +56,22 @@ class DvManagerTest {
     void tearDown() {
         dvManager.close();
         dvRocksDB.close();
+    }
+
+    @Test
+    void testPruneFilesRemovesOnlyMatchingEntries() throws Exception {
+        // Two rowIds map into file 99 (to be removed), one into the surviving file 1.
+        dvRocksDB.rowPosIndex().put(10L, new FilePos(99, 0L));
+        dvRocksDB.rowPosIndex().put(11L, new FilePos(99, 5L));
+        dvRocksDB.rowPosIndex().put(12L, new FilePos(1, 7L));
+
+        dvRocksDB.rowPosIndex().pruneFiles(new HashSet<>(Collections.singletonList(99)));
+
+        assertThat(dvRocksDB.rowPosIndex().get(10L)).isNull();
+        assertThat(dvRocksDB.rowPosIndex().get(11L)).isNull();
+        // Surviving file's mapping is untouched.
+        assertThat(dvRocksDB.rowPosIndex().get(12L)).isNotNull();
+        assertThat(dvRocksDB.rowPosIndex().get(12L).fileId()).isEqualTo(1);
     }
 
     @Test

@@ -170,12 +170,13 @@ class DvRpcMessageUtilsTest {
                 new DvPositionReportData.DvBucketOffset(
                         200L, Collections.emptyMap(), Collections.emptyList()));
 
-        DvPrepareData data = new DvPrepareData(42L, 7L, bucketOffsets);
+        DvPrepareData data = new DvPrepareData(42L, 7L, 88L, bucketOffsets);
 
         PbDvPrepare pb = ServerRpcMessageUtils.buildDvPrepareMessage(data);
 
         assertThat(pb.getTableId()).isEqualTo(42L);
         assertThat(pb.getReadableSnapshotId()).isEqualTo(7L);
+        assertThat(pb.getIndexSnapshotId()).isEqualTo(88L);
         assertThat(pb.getBucketOffsetsCount()).isEqualTo(2);
 
         // Verify round-trip: serialize and parse back
@@ -185,6 +186,7 @@ class DvRpcMessageUtilsTest {
 
         assertThat(parsed.getTableId()).isEqualTo(42L);
         assertThat(parsed.getReadableSnapshotId()).isEqualTo(7L);
+        assertThat(parsed.getIndexSnapshotId()).isEqualTo(88L);
         assertThat(parsed.getBucketOffsetsCount()).isEqualTo(2);
     }
 
@@ -200,7 +202,7 @@ class DvRpcMessageUtilsTest {
                 new DvPositionReportData.DvBucketOffset(
                         999L, dictEntries, Arrays.asList("/old/path")));
 
-        DvPrepareData original = new DvPrepareData(100L, 50L, bucketOffsets);
+        DvPrepareData original = new DvPrepareData(100L, 50L, 60L, bucketOffsets);
 
         // Data -> Proto
         PbDvPrepare pb = ServerRpcMessageUtils.buildDvPrepareMessage(original);
@@ -215,6 +217,7 @@ class DvRpcMessageUtilsTest {
 
         assertThat(parsed.getTableId()).isEqualTo(100L);
         assertThat(parsed.getReadableSnapshotId()).isEqualTo(50L);
+        assertThat(parsed.getIndexSnapshotId()).isEqualTo(60L);
         assertThat(parsed.getBucketOffsets()).hasSize(1);
 
         DvPositionReportData.DvBucketOffset parsedBo =

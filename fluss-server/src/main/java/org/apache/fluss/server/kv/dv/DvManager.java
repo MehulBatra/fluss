@@ -138,7 +138,8 @@ public class DvManager implements Closeable {
      * @param bucketId this tablet's bucket ID
      * @param bucketOffset per-bucket DV data (readableOffset, newFileDictEntries, oldFiles)
      * @param downloader SST downloader configured with remote dir
-     * @param snapshotId the readable snapshot ID for locating SST files
+     * @param snapshotId the index snapshot ID the RowPos SST was uploaded under (may differ from
+     *     the readable snapshot; used only to locate the SST files)
      * @param localTempDir local directory for downloaded SST files
      */
     public void handlePrepare(
@@ -312,6 +313,12 @@ public class DvManager implements Closeable {
         for (int fileId : oldFileIds) {
             dvRocksDB.lakeDv().delete(fileId);
         }
+
+        // Prune RowPosIndex entries pointing to old files. Without this, a stale
+        // rowId->(oldFile,pos)
+        // mapping survives removal and a later supersede/resolve could mark a position that a
+        // surviving/live row now occupies -> over-masking (visible count drops below true count).
+        dvRocksDB.rowPosIndex().pruneFiles(oldFileIdSet);
 
         // Remove PendingDeletes entries pointing to old files
         List<Long> toDelete = new ArrayList<>();

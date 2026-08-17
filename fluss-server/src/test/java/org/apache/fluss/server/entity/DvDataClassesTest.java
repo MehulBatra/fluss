@@ -49,7 +49,7 @@ class DvDataClassesTest {
                 new DvPositionReportData.DvBucketOffset(
                         200L, Collections.emptyMap(), Collections.emptyList()));
 
-        DvPositionReportData data = new DvPositionReportData(bucketOffsets);
+        DvPositionReportData data = new DvPositionReportData(bucketOffsets, 0L);
 
         assertThat(data.getBucketOffsets()).hasSize(2);
         assertThat(data.getBucketOffsets().get(new TableBucket(1L, 0)).getReadableOffset())
@@ -97,7 +97,7 @@ class DvDataClassesTest {
                 new DvPositionReportData.DvBucketOffset(
                         500L, dictEntries, Arrays.asList("/dict/old.sst")));
 
-        DvPrepareData data = new DvPrepareData(42L, 7L, bucketOffsets);
+        DvPrepareData data = new DvPrepareData(42L, 7L, 0L, bucketOffsets);
 
         assertThat(data.getTableId()).isEqualTo(42L);
         assertThat(data.getReadableSnapshotId()).isEqualTo(7L);
@@ -130,7 +130,7 @@ class DvDataClassesTest {
                 new DvPositionReportData.DvBucketOffset(
                         300L, Collections.emptyMap(), Collections.emptyList()));
 
-        DvPrepareData data = new DvPrepareData(42L, 7L, bucketOffsets);
+        DvPrepareData data = new DvPrepareData(42L, 7L, 0L, bucketOffsets);
 
         DvPrepareData filtered =
                 data.filterByBuckets(
@@ -182,7 +182,7 @@ class DvDataClassesTest {
                         Collections.singletonMap(1, "/sst/f1.sst"),
                         Arrays.asList("/sst/old.sst")));
 
-        DvPositionReportData dvReport = new DvPositionReportData(bucketOffsets);
+        DvPositionReportData dvReport = new DvPositionReportData(bucketOffsets, 0L);
 
         CommitLakeTableSnapshotsData.Builder builder = CommitLakeTableSnapshotsData.builder();
         builder.addTableSnapshot(42L, null, null, null, null, dvReport);
@@ -217,7 +217,7 @@ class DvDataClassesTest {
                 new DvPositionReportData.DvBucketOffset(
                         100L, Collections.emptyMap(), Collections.emptyList()));
 
-        DvPrepareData dvPrepare = new DvPrepareData(42L, 7L, bucketOffsets);
+        DvPrepareData dvPrepare = new DvPrepareData(42L, 7L, 0L, bucketOffsets);
 
         NotifyLakeTableOffsetData data =
                 new NotifyLakeTableOffsetData(5, new HashMap<>(), dvPrepare);

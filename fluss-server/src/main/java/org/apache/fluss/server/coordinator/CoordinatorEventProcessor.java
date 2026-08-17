@@ -2140,8 +2140,13 @@ public class CoordinatorEventProcessor implements EventProcessor {
                             snapshot.getLakeSnapshotMetadata();
                     DvPositionReportData dvReport = snapshot.getDvPositionReport();
                     long snapshotId = originalMetadata.getSnapshotId();
+                    // readable snapshot = committed; index snapshot may differ (e.g. Iceberg).
                     DvPrepareData dvPrepare =
-                            new DvPrepareData(tableId, snapshotId, dvReport.getBucketOffsets());
+                            new DvPrepareData(
+                                    tableId,
+                                    snapshotId,
+                                    dvReport.getIndexSnapshotId(),
+                                    dvReport.getBucketOffsets());
                     dvPrepareEvents.put(
                             tableId,
                             new DvPrepareEvent(

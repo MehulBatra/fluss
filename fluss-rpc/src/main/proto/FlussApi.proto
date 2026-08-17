@@ -1217,6 +1217,10 @@ message PbLakeTableSnapshotMetadata {
 
 message PbDvPositionReport {
   repeated PbDvBucketOffset bucket_offsets = 1;
+  // Snapshot the RowPos index/SST was uploaded under (compactSnapshotId). May differ from the
+  // committed/readable snapshot for lakes (e.g. Iceberg) where the indexed and readable snapshots
+  // are distinct. Absent for lakes where they coincide (e.g. Paimon).
+  optional int64 index_snapshot_id = 2;
 }
 
 message PbDvBucketOffset {
@@ -1242,6 +1246,9 @@ message PbDvPrepare {
   required int64 table_id = 1;
   required int64 readable_snapshot_id = 2;
   repeated PbDvBucketOffset bucket_offsets = 3;
+  // Snapshot to download the RowPos index/SST from (compactSnapshotId). Absent -> fall back to
+  // readable_snapshot_id (lakes where indexed and readable snapshots coincide).
+  optional int64 index_snapshot_id = 4;
 }
 
 message PbLakeTableSnapshotInfo {

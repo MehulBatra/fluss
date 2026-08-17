@@ -21,13 +21,16 @@ import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.RocksIterator;
 import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Operations wrapper for the RowPosIndex Column Family.
@@ -94,6 +97,34 @@ public class RowPosIndex {
         } catch (RocksDBException e) {
             throw new IOException(
                     "Failed to add RowPosIndex delete to WriteBatch for rowId " + rowId, e);
+        }
+    }
+
+    /**
+     * Deletes every RowId-&gt;FilePos entry whose FilePos points to one of the given fileIds.
+     * Called when files are removed (compaction/cleanup) so stale mappings can't later resolve a
+     * PendingDelete onto a position that a surviving/live row now occupies.
+     */
+    public void pruneFiles(Set<Integer> fileIds) throws IOException {
+        if (fileIds.isEmpty()) {
+            return;
+        }
+        List<byte[]> keysToDelete = new ArrayList<>();
+        try (RocksIterator it = db.newIterator(cfHandle)) {
+            it.seekToFirst();
+            while (it.isValid()) {
+                if (fileIds.contains(FilePos.decode(it.value()).fileId())) {
+                    keysToDelete.add(it.key());
+                }
+                it.next();
+            }
+        }
+        try {
+            for (byte[] key : keysToDelete) {
+                db.delete(cfHandle, writeOptions, key);
+            }
+        } catch (RocksDBException e) {
+            throw new IOException("Failed to prune RowPosIndex entries for removed files", e);
         }
     }
 

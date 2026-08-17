@@ -93,6 +93,8 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -109,6 +111,7 @@ import static org.apache.fluss.testutils.DataTestUtils.compactedRow;
 import static org.apache.fluss.testutils.DataTestUtils.createBasicMemoryLogRecords;
 import static org.apache.fluss.testutils.LogRecordsAssert.assertThatLogRecords;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Fail.fail;
 
@@ -192,6 +195,19 @@ class KvTabletTest {
             SchemaGetter schemaGetter,
             Map<String, String> tableConfig)
             throws Exception {
+        return createKvTablet(
+                tablePath, tableBucket, logTablet, tmpKvDir, schemaGetter, tableConfig, false);
+    }
+
+    private KvTablet createKvTablet(
+            PhysicalTablePath tablePath,
+            TableBucket tableBucket,
+            LogTablet logTablet,
+            File tmpKvDir,
+            SchemaGetter schemaGetter,
+            Map<String, String> tableConfig,
+            boolean dvEnabled)
+            throws Exception {
         TableConfig tableConf = new TableConfig(Configuration.fromMap(tableConfig));
         RowMerger rowMerger = RowMerger.create(tableConf, KvFormat.COMPACTED, schemaGetter);
         AutoIncrementManager autoIncrementManager =
@@ -217,7 +233,50 @@ class KvTabletTest {
                 tableConf.getChangelogImage(),
                 KvManager.getDefaultRateLimiter(),
                 autoIncrementManager,
-                false);
+                dvEnabled);
+    }
+
+    @Test
+    void testDvEnabledInsertAndFlush() throws Exception {
+        PhysicalTablePath physicalTablePath = PhysicalTablePath.of(TablePath.of("db", "dv_kv"));
+        schemaGetter = new TestingSchemaGetter(new SchemaInfo(DATA1_SCHEMA_PK, schemaId));
+        logTablet = createLogTablet(tempLogDir, 0L, physicalTablePath);
+        TableBucket tableBucket = logTablet.getTableBucket();
+        kvTablet =
+                createKvTablet(
+                        physicalTablePath,
+                        tableBucket,
+                        logTablet,
+                        tmpKvDir,
+                        schemaGetter,
+                        new HashMap<>(),
+                        true);
+
+        KvRecordTestUtils.KvRecordFactory factory =
+                KvRecordTestUtils.KvRecordFactory.of(DATA1_SCHEMA_PK.getRowType());
+        KvRecordBatch batch =
+                kvRecordBatchFactory.ofRecords(
+                        factory.ofRecord("k1".getBytes(), new Object[] {1, "v1"}));
+
+        // a DV-enabled insert must append and then flush without blocking or fatal error
+        // (this is exactly the path Replica.maybeIncrementLeaderHW -> mayFlushKv drives).
+        kvTablet.putAsLeader(batch, null);
+        long endOffset = logTablet.localLogEndOffset();
+        assertThat(endOffset).isGreaterThan(0L);
+
+        AtomicReference<Throwable> fatal = new AtomicReference<>();
+        kvTablet.flush(endOffset, fatal::set);
+        assertThat(fatal.get()).isNull();
+
+        // closing a DV KvTablet (which closes DvRocksDB) must not hang - this is the
+        // cluster-teardown path that also hangs for DV tables.
+        Future<?> closeFuture =
+                executor.submit(
+                        () -> {
+                            kvTablet.close();
+                            return null;
+                        });
+        assertThatCode(() -> closeFuture.get(15, TimeUnit.SECONDS)).doesNotThrowAnyException();
     }
 
     @Test

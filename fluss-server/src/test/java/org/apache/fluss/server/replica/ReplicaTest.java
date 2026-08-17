@@ -24,6 +24,8 @@ import org.apache.fluss.metadata.PhysicalTablePath;
 import org.apache.fluss.metadata.SchemaGetter;
 import org.apache.fluss.metadata.SchemaInfo;
 import org.apache.fluss.metadata.TableBucket;
+import org.apache.fluss.metadata.TableDescriptor;
+import org.apache.fluss.metadata.TableInfo;
 import org.apache.fluss.metadata.TablePath;
 import org.apache.fluss.record.ChangeType;
 import org.apache.fluss.record.KvRecordBatch;
@@ -71,6 +73,7 @@ import static org.apache.fluss.record.TestData.DATA1;
 import static org.apache.fluss.record.TestData.DATA1_PHYSICAL_TABLE_PATH;
 import static org.apache.fluss.record.TestData.DATA1_PHYSICAL_TABLE_PATH_PK;
 import static org.apache.fluss.record.TestData.DATA1_ROW_TYPE;
+import static org.apache.fluss.record.TestData.DATA1_SCHEMA_PK;
 import static org.apache.fluss.record.TestData.DATA1_TABLE_ID;
 import static org.apache.fluss.record.TestData.DATA1_TABLE_ID_PK;
 import static org.apache.fluss.record.TestData.DATA1_TABLE_PATH;
@@ -78,6 +81,7 @@ import static org.apache.fluss.record.TestData.DATA1_TABLE_PATH_PK;
 import static org.apache.fluss.record.TestData.DATA2;
 import static org.apache.fluss.record.TestData.DATA2_ROW_TYPE;
 import static org.apache.fluss.record.TestData.DATA2_SCHEMA;
+import static org.apache.fluss.record.TestData.DEFAULT_REMOTE_DATA_DIR;
 import static org.apache.fluss.record.TestData.DEFAULT_SCHEMA_ID;
 import static org.apache.fluss.server.coordinator.CoordinatorContext.INITIAL_COORDINATOR_EPOCH;
 import static org.apache.fluss.server.zk.data.LeaderAndIsr.INITIAL_LEADER_EPOCH;
@@ -215,6 +219,58 @@ final class ReplicaTest extends ReplicaTestBase {
         // 3. try to append an out of ordered batch as follower
         logReplica.appendRecordsToFollower(genMemoryLogRecordsWithWriterId(DATA1, writerId, 2, 10));
         assertThat(logReplica.getLocalLogEndOffset()).isEqualTo(20);
+    }
+
+    @Test
+    void testDvReplicaWriteAdvancesHighWatermark() throws Exception {
+        // build a DV-enabled PK table info and make its kv replica a (single-replica) leader.
+        TablePath dvTablePath = TablePath.of("test_db_1", "dv_pk_table");
+        long dvTableId = 100001L;
+        TableDescriptor dvDescriptor =
+                TableDescriptor.builder()
+                        .schema(DATA1_SCHEMA_PK)
+                        .distributedBy(1, "a")
+                        .property(ConfigOptions.TABLE_DATALAKE_ENABLED.key(), "true")
+                        .property(ConfigOptions.TABLE_DELETION_VECTORS_ENABLED.key(), "true")
+                        .build();
+        TableInfo dvTableInfo =
+                TableInfo.of(
+                        dvTablePath, dvTableId, 1, dvDescriptor, DEFAULT_REMOTE_DATA_DIR, 1L, 1L);
+        TableBucket dvBucket = new TableBucket(dvTableId, 0);
+        Replica dvReplica = makeKvReplica(PhysicalTablePath.of(dvTablePath), dvBucket, dvTableInfo);
+        makeLeaderReplica(dvReplica, dvTablePath, dvBucket, INITIAL_LEADER_EPOCH);
+
+        // sanity: the replica must actually be DV-enabled, otherwise the test proves nothing.
+        assertThat(dvReplica.getTableInfo().isDeletionVectorsEnabled()).isTrue();
+        assertThat(dvReplica.getKvTablet().getDvManager()).isNotNull();
+
+        KvRecordTestUtils.KvRecordFactory kvRecordFactory =
+                KvRecordTestUtils.KvRecordFactory.of(DATA1_ROW_TYPE);
+        KvRecordTestUtils.KvRecordBatchFactory kvRecordBatchFactory =
+                KvRecordTestUtils.KvRecordBatchFactory.of(DEFAULT_SCHEMA_ID);
+        KvRecordBatch kvRecords =
+                kvRecordBatchFactory.ofRecords(
+                        kvRecordFactory.ofRecord("k1", new Object[] {1, "v1"}));
+
+        LogAppendInfo info = putRecordsToLeader(dvReplica, kvRecords);
+        long leo = dvReplica.getLocalLogEndOffset();
+        long hwm = dvReplica.getLogTablet().getHighWatermark();
+        // The produce ACK requires HWM to reach the appended offset. For a single-replica DV
+        // leader, HWM must advance to LEO; if it does not, the client write hangs forever.
+        assertThat(hwm)
+                .as(
+                        "HWM must advance to LEO for a DV write (leo=%s lastOffset=%s)",
+                        leo, info.lastOffset())
+                .isEqualTo(leo);
+
+        // the acks=-1 completion gate the client's write depends on must be satisfied,
+        // otherwise the client retries forever and flush() hangs.
+        org.apache.fluss.utils.types.Tuple2<Boolean, org.apache.fluss.rpc.protocol.Errors> gate =
+                dvReplica.checkEnoughReplicasReachOffset(leo);
+        assertThat(gate.f1)
+                .as("delayed-write gate error must be NONE (was %s)", gate.f1)
+                .isEqualTo(org.apache.fluss.rpc.protocol.Errors.NONE);
+        assertThat(gate.f0).as("delayed-write gate must be satisfied").isTrue();
     }
 
     @Test

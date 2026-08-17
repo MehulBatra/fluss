@@ -30,14 +30,18 @@ public class DvPrepareData {
 
     private final long tableId;
     private final long readableSnapshotId;
+    // Snapshot to download the RowPos index/SST from; 0 -> fall back to readableSnapshotId.
+    private final long indexSnapshotId;
     private final Map<TableBucket, DvPositionReportData.DvBucketOffset> bucketOffsets;
 
     public DvPrepareData(
             long tableId,
             long readableSnapshotId,
+            long indexSnapshotId,
             Map<TableBucket, DvPositionReportData.DvBucketOffset> bucketOffsets) {
         this.tableId = tableId;
         this.readableSnapshotId = readableSnapshotId;
+        this.indexSnapshotId = indexSnapshotId;
         this.bucketOffsets = bucketOffsets;
     }
 
@@ -47,6 +51,11 @@ public class DvPrepareData {
 
     public long getReadableSnapshotId() {
         return readableSnapshotId;
+    }
+
+    /** Snapshot to download the RowPos index from; 0 -> use {@link #getReadableSnapshotId()}. */
+    public long getIndexSnapshotId() {
+        return indexSnapshotId;
     }
 
     /**
@@ -68,6 +77,6 @@ public class DvPrepareData {
                 filtered.put(tb, offset);
             }
         }
-        return new DvPrepareData(tableId, readableSnapshotId, filtered);
+        return new DvPrepareData(tableId, readableSnapshotId, indexSnapshotId, filtered);
     }
 }
