@@ -59,6 +59,8 @@ class SnapshotFilesReader implements CloseableIterator<InternalRow> {
     private final Schema targetSchema;
     private final SchemaGetter schemaGetter;
     private final ValueDecoder valueDecoder;
+    // DV tables prefix each value with a varint RowId; decode must skip it.
+    private final boolean dvEnabled;
     @Nullable private final int[] projectedFields;
     private RocksIteratorWrapper rocksIteratorWrapper;
 
@@ -76,6 +78,7 @@ class SnapshotFilesReader implements CloseableIterator<InternalRow> {
 
     SnapshotFilesReader(
             KvFormat kvFormat,
+            boolean dvEnabled,
             Path rocksDbPath,
             @Nullable int[] projectedFields,
             int targetSchemaId,
@@ -86,6 +89,7 @@ class SnapshotFilesReader implements CloseableIterator<InternalRow> {
         this.targetSchema = targetSchema;
         this.schemaGetter = schemaGetter;
         this.valueDecoder = new ValueDecoder(schemaGetter, kvFormat);
+        this.dvEnabled = dvEnabled;
         this.projectedFields = projectedFields;
         closeableRegistry = new CloseableRegistry();
         try {
@@ -165,7 +169,10 @@ class SnapshotFilesReader implements CloseableIterator<InternalRow> {
         byte[] value = rocksIteratorWrapper.value();
         rocksIteratorWrapper.next();
 
-        BinaryValue originValue = valueDecoder.decodeValue(value);
+        BinaryValue originValue =
+                dvEnabled
+                        ? valueDecoder.decodeValueSkippingRowId(value)
+                        : valueDecoder.decodeValue(value);
         InternalRow originRow = originValue.row;
         if (targetSchemaId != originValue.schemaId) {
             int[] indexMapping =

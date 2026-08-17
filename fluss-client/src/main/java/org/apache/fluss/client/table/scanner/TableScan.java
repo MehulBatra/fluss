@@ -211,6 +211,7 @@ public class TableScan implements Scan {
                 projectedColumns,
                 scannerTmpDir,
                 tableInfo.getTableConfig().getKvFormat(),
+                tableInfo.isDeletionVectorsEnabled(),
                 conn.getOrCreateRemoteFileDownloader());
     }
 
