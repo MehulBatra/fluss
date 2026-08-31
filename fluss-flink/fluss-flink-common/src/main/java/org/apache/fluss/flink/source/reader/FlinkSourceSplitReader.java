@@ -481,6 +481,13 @@ public class FlinkSourceSplitReader implements SplitReader<RecordAndPos, SourceS
                 if (lastRawRecord.logOffset() >= stoppingOffset - 1) {
                     stoppingOffsets.put(scanBucket, stoppingOffset);
                     finishedSplits.add(splitId);
+                    // Bounded log split reached its stopping offset. Unsubscribe the bucket so
+                    // later polls don't produce newer records (from ongoing ingestion) tagged
+                    // with this now-finished split id. Once Flink processes the finish it
+                    // unregisters the split, and a straggler batch for it would otherwise throw
+                    // "Have records for a split that was not registered".
+                    unsubscribeLogBucket(scanBucket);
+                    subscribedBuckets.remove(scanBucket);
                 }
             }
             // Apply DV filtering for DV batch read buckets
@@ -553,6 +560,15 @@ public class FlinkSourceSplitReader implements SplitReader<RecordAndPos, SourceS
                 snapshotSplit.getTableBucket(),
                 recordsForSplit,
                 flinkSourceReaderMetrics);
+    }
+
+    private void unsubscribeLogBucket(TableBucket tableBucket) {
+        Long partitionId = tableBucket.getPartitionId();
+        if (partitionId != null) {
+            logScanner.unsubscribe(partitionId, tableBucket.getBucket());
+        } else {
+            logScanner.unsubscribe(tableBucket.getBucket());
+        }
     }
 
     private long getStoppingOffset(TableBucket tableBucket) {
